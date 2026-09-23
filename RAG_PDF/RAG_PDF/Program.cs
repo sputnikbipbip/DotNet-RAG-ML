@@ -73,7 +73,10 @@ app.UseStaticFiles();
 // API Endpoints
 app.MapPost("/upload", async (IFormFile file, PdfIngestionService ingestionService) =>
 {
-    if (file == null || file.Length == 0) return Results.BadRequest("Invalid file.");
+    if (file == null || file.Length == 0)
+    {
+        return Results.BadRequest("Invalid file.");
+    }
     
     using var stream = file.OpenReadStream();
     await ingestionService.IngestPdfAsync(stream, file.FileName);
@@ -84,12 +87,13 @@ app.MapPost("/upload", async (IFormFile file, PdfIngestionService ingestionServi
 
 app.MapPost("/ask", async (QuestionRequest request, RagService ragService) =>
 {
-    if (string.IsNullOrWhiteSpace(request.Question)) return Results.BadRequest("Question cannot be empty.");
+    if (string.IsNullOrWhiteSpace(request.Question))
+    {
+        return Results.BadRequest("Question cannot be empty.");
+    }
     
     var answer = await ragService.AskQuestionAsync(request.Question);
     return Results.Ok(new { Answer = answer });
 });
 
 app.Run();
-
-public record QuestionRequest(string Question);

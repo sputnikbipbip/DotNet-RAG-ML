@@ -33,19 +33,20 @@ public class PdfIngestionService
         var chunks = ChunkText(text, 1000);
 
         // 4. Generate embeddings and Save
-        foreach (var chunkText in chunks)
+        if (chunks.Count > 0)
         {
-            var embeddings = await _embeddingGenerator.GenerateAsync([chunkText]);
-            var embedding = embeddings[0].Vector;
-            
-            var chunk = new PdfChunk
-            {
-                Text = chunkText,
-                FileName = fileName,
-                Vector = embedding
-            };
+            // Generate embeddings for ALL chunks in a single (or internally batched) API call
+            var generatedEmbeddings = await _embeddingGenerator.GenerateAsync(chunks);
 
-            await _collection.UpsertAsync(chunk);
+            // Zip the original chunks with their generated embeddings
+            var pdfChunks = chunks.Zip(generatedEmbeddings, (text, embedding) => new PdfChunk
+            {
+                Text = text,
+                FileName = fileName,
+                Vector = embedding.Vector
+            }).ToList();
+
+            await _collection.UpsertAsync(pdfChunks);
         }
     }
 
