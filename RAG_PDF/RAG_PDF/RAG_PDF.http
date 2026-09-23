@@ -1,0 +1,6 @@
+@RAG_PDF_HostAddress = http://localhost:5044
+
+GET {{RAG_PDF_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

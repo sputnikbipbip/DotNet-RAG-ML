@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF RAG Chat</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+    <div class="max-w-2xl mx-auto bg-white rounded-lg shadow-md p-6">
+        <h1 class="text-2xl font-bold mb-6 text-center text-blue-600">RAG PDF Assistant</h1>
+        
+        <div class="mb-8 border-b pb-6">
+            <h2 class="text-lg font-semibold mb-3">Upload PDF</h2>
+            <div class="flex items-center space-x-4">
+                <input type="file" id="pdfFile" accept=".pdf" class="block w-full text-sm text-gray-500
+                    file:mr-4 file:py-2 file:px-4
+                    file:rounded-full file:border-0
+                    file:text-sm file:font-semibold
+                    file:bg-blue-50 file:text-blue-700
+                    hover:file:bg-blue-100
+                "/>
+                <button onclick="uploadPdf()" id="uploadBtn" class="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 transition">
+                    Upload
+                </button>
+            </div>
+            <p id="uploadStatus" class="mt-2 text-sm"></p>
+        </div>
+
+        <div>
+            <h2 class="text-lg font-semibold mb-3">Ask Question</h2>
+            <div class="flex flex-col space-y-4">
+                <textarea id="question" rows="3" placeholder="Enter your question about the uploaded PDFs..." class="w-full p-3 border rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"></textarea>
+                <button onclick="askQuestion()" id="askBtn" class="bg-green-600 text-white px-6 py-2 rounded-md hover:bg-green-700 transition self-end">
+                    Ask Question
+                </button>
+            </div>
+        </div>
+
+        <div id="answerContainer" class="mt-8 hidden">
+            <h3 class="font-bold text-gray-700 mb-2">Answer:</h3>
+            <div id="answerText" class="p-4 bg-gray-50 border rounded-md text-gray-800 leading-relaxed whitespace-pre-wrap"></div>
+        </div>
+    </div>
+
+    <script>
+        async function uploadPdf() {
+            const fileInput = document.getElementById('pdfFile');
+            const status = document.getElementById('uploadStatus');
+            const btn = document.getElementById('uploadBtn');
+
+            if (!fileInput.files.length) {
+                alert('Please select a file');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            btn.disabled = true;
+            status.textContent = 'Uploading and processing...';
+            status.className = 'mt-2 text-sm text-blue-600';
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    status.textContent = 'PDF processed and indexed successfully!';
+                    status.className = 'mt-2 text-sm text-green-600';
+                } else {
+                    status.textContent = 'Upload failed: ' + await response.text();
+                    status.className = 'mt-2 text-sm text-red-600';
+                }
+            } catch (err) {
+                status.textContent = 'Error: ' + err.message;
+                status.className = 'mt-2 text-sm text-red-600';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function askQuestion() {
+            const questionText = document.getElementById('question').value;
+            const answerContainer = document.getElementById('answerContainer');
+            const answerText = document.getElementById('answerText');
+            const btn = document.getElementById('askBtn');
+
+            if (!questionText.trim()) {
+                alert('Please enter a question');
+                return;
+            }
+
+            btn.disabled = true;
+            answerContainer.classList.remove('hidden');
+            answerText.textContent = 'Thinking...';
+
+            try {
+                const response = await fetch('/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: questionText })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    answerText.textContent = data.answer;
+                } else {
+                    answerText.textContent = 'Failed to get answer: ' + await response.text();
+                }
+            } catch (err) {
+                answerText.textContent = 'Error: ' + err.message;
+            } finally {
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
