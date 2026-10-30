@@ -1,22 +1,15 @@
 namespace RAG_PDF.Options;
 
-public class DeepSeekOptions
+public class OllamaOptions
 {
-    public string ApiKey { get; set; } = string.Empty;
-    public string BaseUrl { get; set; } = "https://api.deepseek.com/v1";
-    public string ModelId { get; set; } = "deepseek-chat";
+    public string BaseUrl { get; set; } = "http://localhost:11434/v1/";
+    public string EmbeddingModel { get; set; } = "embeddinggemma-2:270m";
+    public string ChatModel { get; set; } = "phi4-mini:latest";
 }
 
 public class QdrantOptions
 {
     public string Host { get; set; } = "localhost";
     public int GrpcPort { get; set; } = 6334;
-    public string CollectionName { get; set; } = "pdf-vectors";
-}
-
-public class AzureOpenAIOptions
-{
-    public string Endpoint { get; set; } = string.Empty;
-    public string ApiKey { get; set; } = string.Empty;
-    public string EmbeddingDeploymentName { get; set; } = "text-embedding-3-small";
+    public string CollectionName { get; set; } = "pdf-vectors-embeddinggemma2-768";
 }

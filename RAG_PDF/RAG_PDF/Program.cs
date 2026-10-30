@@ -8,36 +8,50 @@ using RAG_PDF.Models;
 using RAG_PDF.Options;
 using RAG_PDF.Services;
 using System.ClientModel;
-using Azure.AI.OpenAI;
-using Azure;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Options
-builder.Services.Configure<DeepSeekOptions>(builder.Configuration.GetSection("DeepSeek"));
+builder.Services.AddOptions<OllamaOptions>()
+    .Bind(builder.Configuration.GetSection("Ollama"))
+    .Validate(options => Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps),
+        "Ollama:BaseUrl must be an absolute HTTP or HTTPS URL.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.EmbeddingModel), "Ollama:EmbeddingModel is required.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.ChatModel), "Ollama:ChatModel is required.")
+    .ValidateOnStart();
 builder.Services.AddOptions<QdrantOptions>()
     .Bind(builder.Configuration.GetSection("Qdrant"))
     .Validate(options => !string.IsNullOrWhiteSpace(options.Host), "Qdrant:Host is required.")
     .Validate(options => options.GrpcPort is > 0 and <= 65535, "Qdrant:GrpcPort must be between 1 and 65535.")
     .Validate(options => !string.IsNullOrWhiteSpace(options.CollectionName), "Qdrant:CollectionName is required.")
     .ValidateOnStart();
-builder.Services.Configure<AzureOpenAIOptions>(builder.Configuration.GetSection("AzureOpenAI"));
 
-// DeepSeek Chat Client
+// Ollama's OpenAI-compatible API requires a nonempty client key but ignores its value.
+builder.Services.AddSingleton<OpenAIClient>(sp =>
+{
+    var options = sp.GetRequiredService<IOptions<OllamaOptions>>().Value;
+    return new OpenAIClient(new ApiKeyCredential("ollama"), new OpenAIClientOptions
+    {
+        Endpoint = new Uri(options.BaseUrl)
+    });
+});
+
+// Local Ollama Chat Client
 builder.Services.AddSingleton<IChatClient>(sp =>
 {
-    var options = sp.GetRequiredService<IOptions<DeepSeekOptions>>().Value;
-    return new OpenAIClient(new ApiKeyCredential(options.ApiKey), new OpenAIClientOptions { Endpoint = new Uri(options.BaseUrl) })
-        .GetChatClient(options.ModelId)
+    var options = sp.GetRequiredService<IOptions<OllamaOptions>>().Value;
+    return sp.GetRequiredService<OpenAIClient>()
+        .GetChatClient(options.ChatModel)
         .AsIChatClient();
 });
 
-// Azure OpenAI Embedding Generator
+// Local Ollama Embedding Generator
 builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(sp =>
 {
-    var options = sp.GetRequiredService<IOptions<AzureOpenAIOptions>>().Value;
-    return new AzureOpenAIClient(new Uri(options.Endpoint), new AzureKeyCredential(options.ApiKey))
-        .GetEmbeddingClient(options.EmbeddingDeploymentName)
+    var options = sp.GetRequiredService<IOptions<OllamaOptions>>().Value;
+    return sp.GetRequiredService<OpenAIClient>()
+        .GetEmbeddingClient(options.EmbeddingModel)
         .AsIEmbeddingGenerator();
 });
 

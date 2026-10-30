@@ -32,14 +32,22 @@ public class PdfIngestionService
         // 3. Chunk text (Simple chunking for this example)
         var chunks = ChunkText(text, 1000);
 
-        // 4. Generate embeddings and Save
-        if (chunks.Count > 0)
+        // 4. Keep local embedding requests small and use EmbeddingGemma's document prefix.
+        foreach (var batch in chunks.Chunk(16))
         {
-            // Generate embeddings for ALL chunks in a single (or internally batched) API call
-            var generatedEmbeddings = await _embeddingGenerator.GenerateAsync(chunks);
+            var inputs = batch.Select(chunk => $"title: none | text: {chunk}");
+            var generatedEmbeddings = await _embeddingGenerator.GenerateAsync(inputs);
+
+            if (generatedEmbeddings.Count != batch.Length ||
+                generatedEmbeddings.Any(embedding => embedding.Vector.Length != PdfChunk.VectorDimensions))
+            {
+                throw new InvalidOperationException(
+                    $"The embedding model must return one {PdfChunk.VectorDimensions}-dimensional vector per chunk. " +
+                    "Check Ollama:EmbeddingModel and use a matching Qdrant collection.");
+            }
 
             // Zip the original chunks with their generated embeddings
-            var pdfChunks = chunks.Zip(generatedEmbeddings, (text, embedding) => new PdfChunk
+            var pdfChunks = batch.Zip(generatedEmbeddings, (text, embedding) => new PdfChunk
             {
                 Text = text,
                 FileName = fileName,

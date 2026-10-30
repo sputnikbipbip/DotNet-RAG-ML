@@ -23,8 +23,14 @@ public class RagService
 
     public async Task<string> AskQuestionAsync(string question)
     {
-        // 1. Generate embedding for the question
-        var questionEmbeddings = await _embeddingGenerator.GenerateAsync([question]);
+        // 1. Use EmbeddingGemma's retrieval-query prefix (documents have a different prefix).
+        var questionEmbeddings = await _embeddingGenerator.GenerateAsync([$"task: search result | query: {question}"]);
+        if (questionEmbeddings.Count != 1 || questionEmbeddings[0].Vector.Length != PdfChunk.VectorDimensions)
+        {
+            throw new InvalidOperationException(
+                $"The embedding model must return a {PdfChunk.VectorDimensions}-dimensional query vector. " +
+                "Use the same model as PDF ingestion and a matching Qdrant collection.");
+        }
         var questionVector = questionEmbeddings[0].Vector;
 
         // 2. Search for relevant chunks
@@ -48,7 +54,7 @@ public class RagService
         var response = await _chatClient.GetResponseAsync([
             new ChatMessage(ChatRole.System, systemPrompt),
             new ChatMessage(ChatRole.User, userPrompt)
-        ]);
+        ], new ChatOptions { MaxOutputTokens = 512 });
 
         return response.Text ?? "No answer generated.";
     }

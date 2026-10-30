@@ -1,6 +1,6 @@
 ### Deep Dive into RAG (Retrieval-Augmented Generation)
 
-This guide explains RAG, how this project implements it using .NET, and how to run it with a local Qdrant database. Azure OpenAI generates embeddings and DeepSeek generates answers; only vector storage runs locally.
+This guide explains RAG and how to run this .NET application with local models and a local vector database. Ollama generates embeddings with **`embeddinggemma-2:270m`** and answers with **`phi4-mini:latest`**. Qdrant stores the document chunks and vectors. No Azure or DeepSeek account or API key is required.
 
 ---
 
@@ -21,7 +21,7 @@ This guide explains RAG, how this project implements it using .NET, and how to r
 3.  **Generation Phase**:
     *   The system takes the top relevant chunks and "stuffs" them into a prompt along with your question.
     *   **Prompt**: *"Using this context: [Found Chunks], please answer the following question: [Your Question]"*
-    *   The LLM (like DeepSeek or GPT-4) uses the provided context to generate a factual, grounded answer.
+    *   The local chat model uses the provided context to generate an answer grounded in the retrieved text.
 
 ---
 
@@ -32,12 +32,13 @@ This project is built with **ASP.NET Core 10** and uses the new `Microsoft.Exten
 *   **`PdfIngestionService.cs`**:
     *   Uses **iText** to extract text from PDF pages.
     *   Chunks text into 1000-character segments.
-    *   Generates embeddings using **Azure OpenAI**.
+    *   Generates **768-dimensional** embeddings using Ollama and EmbeddingGemma 2, in batches of at most 16 chunks.
+    *   Uses the model's document prefix, `title: none | text: `, for embedding inputs; stores the original chunk text.
     *   Saves the results into **Qdrant**, creating the collection on the first upload.
 *   **`RagService.cs`**:
-    *   Converts user questions into vectors.
+    *   Converts user questions into vectors using the same embedding model and its query prefix, `task: search result | query: `.
     *   Performs a cosine similarity search in Qdrant, retrieving up to five chunks.
-    *   Sends the retrieved context + question to the **DeepSeek Chat Client** to get the final answer.
+    *   Sends the retrieved context + question to **Phi-4 Mini** through Ollama, limiting each answer to 512 output tokens.
 *   **`Models/PdfChunk.cs`**:
     *   The data model for storage. Notice the `[VectorStoreKey]`, `[VectorStoreData]`, and `[VectorStoreVector]` attributes which define how the data maps to the vector database.
 *   **`Program.cs`**:
@@ -46,46 +47,64 @@ This project is built with **ASP.NET Core 10** and uses the new `Microsoft.Exten
 
 ---
 
-### 3. Prerequisites and Model Providers
-Install the **.NET 10 SDK** and **Docker with Docker Compose**. You also need an Azure OpenAI embedding deployment and a DeepSeek API key. Azure AI Search is no longer required.
+### 3. Prerequisites and Local Models
+Install the **.NET 10 SDK**, **Docker with Docker Compose**, and [Ollama](https://ollama.com/download). Run Ollama directly on your machine; Compose runs Qdrant only.
 
-#### Step A: Azure OpenAI (For Embeddings)
-1.  Create an **Azure OpenAI** resource in the Azure Portal.
-2.  Go to **Azure AI Foundry** (formerly OpenAI Studio) and deploy a model.
-    *   **Model**: `text-embedding-3-small`
-    *   **Deployment Name**: `text-embedding-3-small` (or whatever you prefer, but match it in configuration).
-3.  Copy the **Endpoint** and **API Key**.
+Download the models once (skip this if they are already installed):
 
-The vector schema expects **1,536 dimensions**. Ingestion and question retrieval must use the same embedding model. If you change the model or dimensions, update the schema as needed, use a new collection, and re-upload your PDFs.
+```bash
+ollama pull embeddinggemma-2:270m
+ollama pull phi4-mini:latest
+ollama list
+```
 
-#### Step B: DeepSeek (The LLM/Reasoning Engine)
-1.  Get an API Key from [DeepSeek's platform](https://platform.deepseek.com/).
+Ollama normally runs in the background at `http://localhost:11434`. If it is not already running, start `ollama serve` in another terminal. Do not start a second server if one already owns port 11434.
+
+Verify the embedding model:
+
+```bash
+curl --fail-with-body http://localhost:11434/api/embed \
+  -H "Content-Type: application/json" \
+  -d '{"model":"embeddinggemma-2:270m","input":"title: none | text: Local document search."}'
+```
+
+The response should contain a **768-dimensional vector**. The model metadata's hidden-layer size is not necessarily its output embedding size. Ingestion and question retrieval must use the same embedding model.
+
+The text-only embedding model is approximately 304 MB on disk; the Q4_K_M Phi-4 Mini download is approximately 2.5 GB. Runtime memory also includes model working memory and the chat context/KV cache, so download size is not a RAM estimate. Small embedding batches and bounded answer length keep requests modest. If necessary, configure Ollama with a modest context size (for example, `OLLAMA_CONTEXT_LENGTH=4096` in the server environment, then restart Ollama); the application does not request the model's full 128K context. See [Ollama's context documentation](https://docs.ollama.com/context-length).
 
 ---
 
 ### 4. Configuration
-`RAG_PDF/RAG_PDF/appsettings.json` configures the local database:
+`RAG_PDF/RAG_PDF/appsettings.json` configures the local models and database:
 
 ```json
 {
+  "Ollama": {
+    "BaseUrl": "http://localhost:11434/v1/",
+    "EmbeddingModel": "embeddinggemma-2:270m",
+    "ChatModel": "phi4-mini:latest"
+  },
   "Qdrant": {
     "Host": "localhost",
     "GrpcPort": 6334,
-    "CollectionName": "pdf-vectors"
+    "CollectionName": "pdf-vectors-embeddinggemma2-768"
   }
 }
 ```
 
-Set model-provider credentials with environment variables in the terminal where you run the application:
+Optional environment-variable overrides:
 
 ```bash
-export AzureOpenAI__Endpoint="https://your-resource.openai.azure.com/"
-export AzureOpenAI__ApiKey="your_azure_openai_key"
-export AzureOpenAI__EmbeddingDeploymentName="text-embedding-3-small"
-export DeepSeek__ApiKey="your_deepseek_key"
+export Ollama__BaseUrl="http://localhost:11434/v1/"
+export Ollama__EmbeddingModel="embeddinggemma-2:270m"
+export Ollama__ChatModel="phi4-mini:latest"
 ```
 
-The existing DeepSeek defaults are `https://api.deepseek.com/v1` and `deepseek-chat`. Environment variables override appsettings; keep actual credentials out of committed configuration.
+The application uses Ollama's OpenAI-compatible endpoints. The SDK requires a nonempty client key, so the application supplies the dummy value `ollama`, which the local server ignores. AzureOpenAI and DeepSeek settings are no longer read.
+
+The schema in `Models/PdfChunk.cs` expects **768 dimensions**. If you change embedding models, review the model-specific prefixes in both services, update the schema if needed, choose a fresh Qdrant collection, and re-upload your PDFs. Even models with equal dimensions have different vector spaces. Changing only the chat model does not require re-uploading.
+
+EmbeddingGemma's retrieval prefixes are documented in its [model prompt configuration](https://ollama.com/library/embeddinggemma-2:270m/blobs/031e56a498d3).
 
 The .NET connector uses **gRPC on port 6334**, not the REST port 6333. You can override database settings with `Qdrant__Host`, `Qdrant__GrpcPort`, and `Qdrant__CollectionName`.
 
@@ -101,7 +120,7 @@ Run these commands from the repository root:
    ```
    The REST API is at `http://localhost:6333`; the dashboard is at `http://localhost:6333/dashboard`. Both published ports are bound to loopback for local development. This setup has no database authentication and is intended for use on your own machine.
 
-2. **Start the application** after setting the environment variables above:
+2. **Start the application** with Ollama already running:
    ```bash
    dotnet run --project RAG_PDF/RAG_PDF/RAG_PDF.csproj --launch-profile http
    ```
@@ -119,7 +138,7 @@ Run these commands from the repository root:
      http://localhost:5044/ask
    ```
 
-**Re-upload existing PDFs:** the new Qdrant collection starts empty; existing Azure AI Search records are not migrated. Embeddings are regenerated during upload. Repeated uploads create additional chunks rather than replacing earlier uploads.
+**Re-upload existing PDFs:** the new `pdf-vectors-embeddinggemma2-768` collection starts empty. Existing collections (including `pdf-vectors`) are left intact, but their Azure-generated embeddings cannot be reused. Repeated uploads create additional chunks rather than replacing earlier uploads.
 
 ### 6. Persistence and Troubleshooting
 
@@ -128,7 +147,9 @@ Run these commands from the repository root:
 - Use `docker compose logs qdrant` and `curl --fail http://localhost:6333/readyz` to check the database.
 - Upload a PDF before asking questions: the collection is created during ingestion.
 - If ports 6333 or 6334 are already occupied, change the host-side Compose port mappings and update `Qdrant__GrpcPort` to match the mapped gRPC port.
-- A vector-dimension error means the embedding deployment and the 1,536-dimensional schema do not match.
+- Check Ollama with `curl --fail http://localhost:11434/api/tags`; model-not-found errors require downloading the exact configured model tag. The first request can be slower while models load.
+- A vector-dimension error means the configured embedding model and the 768-dimensional schema do not match. An existing collection with a different dimension also requires choosing a fresh collection.
+- If using Rider, restart the application after changing configuration and set any overrides in its Run/Debug configuration.
 - If you later containerize the application, use the Compose service name `qdrant` as its database host, rather than `localhost`.
 
 ### Summary of the "Best Way to Learn"
