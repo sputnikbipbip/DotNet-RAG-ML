@@ -9,12 +9,12 @@ public class RagService
 {
     private readonly IChatClient _chatClient;
     private readonly IEmbeddingGenerator<string, Embedding<float>> _embeddingGenerator;
-    private readonly VectorStoreCollection<string, PdfChunk> _collection;
+    private readonly VectorStoreCollection<Guid, PdfChunk> _collection;
 
     public RagService(
         IChatClient chatClient,
         IEmbeddingGenerator<string, Embedding<float>> embeddingGenerator,
-        VectorStoreCollection<string, PdfChunk> collection)
+        VectorStoreCollection<Guid, PdfChunk> collection)
     {
         _chatClient = chatClient;
         _embeddingGenerator = embeddingGenerator;

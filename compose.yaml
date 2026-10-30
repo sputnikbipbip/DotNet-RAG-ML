@@ -1,0 +1,24 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.17.0
+    ports:
+      - "127.0.0.1:6333:6333" # REST API and dashboard
+      - "127.0.0.1:6334:6334" # .NET connector (gRPC)
+    volumes:
+      - qdrant-storage:/qdrant/storage
+    healthcheck:
+      # The Qdrant image includes bash, but does not include curl or wget.
+      test:
+        - CMD-SHELL
+        - >-
+          bash -ec 'exec 3<>/dev/tcp/127.0.0.1/6333;
+          printf "GET /readyz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3;
+          read -r status <&3;
+          [[ "$$status" == *" 200 "* ]]'
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  qdrant-storage:

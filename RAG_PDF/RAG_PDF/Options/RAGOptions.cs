@@ -7,11 +7,11 @@ public class DeepSeekOptions
     public string ModelId { get; set; } = "deepseek-chat";
 }
 
-public class AzureAISearchOptions
+public class QdrantOptions
 {
-    public string Endpoint { get; set; } = string.Empty;
-    public string ApiKey { get; set; } = string.Empty;
-    public string IndexName { get; set; } = "pdf-vectors";
+    public string Host { get; set; } = "localhost";
+    public int GrpcPort { get; set; } = 6334;
+    public string CollectionName { get; set; } = "pdf-vectors";
 }
 
 public class AzureOpenAIOptions

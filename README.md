@@ -1,6 +1,6 @@
 ### Deep Dive into RAG (Retrieval-Augmented Generation)
 
-This guide explains the concept of RAG, how this project implements it using .NET, and how to set it up in Azure.
+This guide explains RAG, how this project implements it using .NET, and how to run it with a local Qdrant database. Azure OpenAI generates embeddings and DeepSeek generates answers; only vector storage runs locally.
 
 ---
 
@@ -12,7 +12,7 @@ This guide explains the concept of RAG, how this project implements it using .NE
     *   **Extraction**: Text is pulled out of your documents (PDFs, docs, etc.).
     *   **Chunking**: The text is broken into smaller pieces (chunks). This is necessary because LLMs have a limited "context window."
     *   **Embedding**: Each chunk is passed through an **Embedding Model** which converts text into a long list of numbers (a **Vector**). Chunks with similar meanings have vectors that are "close" to each other mathematically.
-    *   **Storage**: These vectors, along with the original text, are stored in a **Vector Database** (like Azure AI Search).
+    *   **Storage**: These vectors, along with the chunk text and filename, are stored in **Qdrant**, a local vector database.
 
 2.  **Retrieval Phase**:
     *   When you ask a question, your question is also converted into a **Vector** using the same embedding model.
@@ -30,13 +30,13 @@ This project is built with **ASP.NET Core 10** and uses the new `Microsoft.Exten
 
 #### Key Components:
 *   **`PdfIngestionService.cs`**:
-    *   Uses **iTextSharp** to extract text from PDF pages.
+    *   Uses **iText** to extract text from PDF pages.
     *   Chunks text into 1000-character segments.
     *   Generates embeddings using **Azure OpenAI**.
-    *   Saves the results into **Azure AI Search**.
+    *   Saves the results into **Qdrant**, creating the collection on the first upload.
 *   **`RagService.cs`**:
     *   Converts user questions into vectors.
-    *   Performs a similarity search in Azure AI Search.
+    *   Performs a cosine similarity search in Qdrant, retrieving up to five chunks.
     *   Sends the retrieved context + question to the **DeepSeek Chat Client** to get the final answer.
 *   **`Models/PdfChunk.cs`**:
     *   The data model for storage. Notice the `[VectorStoreKey]`, `[VectorStoreData]`, and `[VectorStoreVector]` attributes which define how the data maps to the vector database.
@@ -46,64 +46,90 @@ This project is built with **ASP.NET Core 10** and uses the new `Microsoft.Exten
 
 ---
 
-### 3. Azure Setup Guide
-To make this project work, you need to provision three main resources in Azure.
+### 3. Prerequisites and Model Providers
+Install the **.NET 10 SDK** and **Docker with Docker Compose**. You also need an Azure OpenAI embedding deployment and a DeepSeek API key. Azure AI Search is no longer required.
 
 #### Step A: Azure OpenAI (For Embeddings)
 1.  Create an **Azure OpenAI** resource in the Azure Portal.
 2.  Go to **Azure AI Foundry** (formerly OpenAI Studio) and deploy a model.
     *   **Model**: `text-embedding-3-small`
-    *   **Deployment Name**: `text-embedding-3-small` (or whatever you prefer, but match it in `appsettings.json`).
+    *   **Deployment Name**: `text-embedding-3-small` (or whatever you prefer, but match it in configuration).
 3.  Copy the **Endpoint** and **API Key**.
 
-#### Step B: Azure AI Search (Vector Database)
-1.  Create an **Azure AI Search** resource.
-2.  Choose the **Basic** tier or higher (Free tier has limitations for vector storage).
-3.  Go to **Keys** and copy the **Primary Admin Key**.
-4.  Copy the **Endpoint** (e.g., `https://your-search.search.windows.net`).
+The vector schema expects **1,536 dimensions**. Ingestion and question retrieval must use the same embedding model. If you change the model or dimensions, update the schema as needed, use a new collection, and re-upload your PDFs.
 
-#### Step C: DeepSeek (The LLM/Reasoning Engine)
-*   *Note: While you can use Azure OpenAI (GPT-4) for the chat part too, this project is configured to use **DeepSeek** as the brain.*
+#### Step B: DeepSeek (The LLM/Reasoning Engine)
 1.  Get an API Key from [DeepSeek's platform](https://platform.deepseek.com/).
-2.  If you want to use Azure OpenAI for this part as well, you would need to modify `Program.cs` to use `AzureOpenAIClient.GetChatClient(...)`.
 
 ---
 
 ### 4. Configuration
-Update your `appsettings.json` with the credentials obtained above:
+`RAG_PDF/RAG_PDF/appsettings.json` configures the local database:
 
 ```json
 {
-  "DeepSeek": {
-    "ApiKey": "your_deepseek_key",
-    "BaseUrl": "https://api.deepseek.com/v1",
-    "ModelId": "deepseek-chat"
-  },
-  "AzureAISearch": {
-    "Endpoint": "https://your-search-service.search.windows.net",
-    "ApiKey": "your_search_admin_key",
-    "IndexName": "pdf-vectors"
-  },
-  "AzureOpenAI": {
-    "Endpoint": "https://your-resource.openai.azure.com/",
-    "ApiKey": "your_azure_openai_key",
-    "EmbeddingDeploymentName": "text-embedding-3-small"
+  "Qdrant": {
+    "Host": "localhost",
+    "GrpcPort": 6334,
+    "CollectionName": "pdf-vectors"
   }
 }
 ```
 
+Set model-provider credentials with environment variables in the terminal where you run the application:
+
+```bash
+export AzureOpenAI__Endpoint="https://your-resource.openai.azure.com/"
+export AzureOpenAI__ApiKey="your_azure_openai_key"
+export AzureOpenAI__EmbeddingDeploymentName="text-embedding-3-small"
+export DeepSeek__ApiKey="your_deepseek_key"
+```
+
+The existing DeepSeek defaults are `https://api.deepseek.com/v1` and `deepseek-chat`. Environment variables override appsettings; keep actual credentials out of committed configuration.
+
+The .NET connector uses **gRPC on port 6334**, not the REST port 6333. You can override database settings with `Qdrant__Host`, `Qdrant__GrpcPort`, and `Qdrant__CollectionName`.
+
 ---
 
 ### 5. Running the Project
-1.  **Start the Application**: Run the project in Rider or via `dotnet run`.
-2.  **Upload a PDF**: Use the Swagger UI (at `/openapi/v1.json` or by opening `wwwroot/index.html` if implemented) or use `curl`:
-    ```bash
-    curl -X POST -F "file=@my-document.pdf" https://localhost:7053/upload
-    ```
-3.  **Ask a Question**:
-    ```bash
-    curl -X POST -H "Content-Type: application/json" -d '{"Question": "What is the summary of this document?"}' https://localhost:7053/ask
-    ```
+Run these commands from the repository root:
+
+1. **Start Qdrant and wait for readiness**:
+   ```bash
+   docker compose up -d --wait
+   docker compose ps
+   ```
+   The REST API is at `http://localhost:6333`; the dashboard is at `http://localhost:6333/dashboard`. Both published ports are bound to loopback for local development. This setup has no database authentication and is intended for use on your own machine.
+
+2. **Start the application** after setting the environment variables above:
+   ```bash
+   dotnet run --project RAG_PDF/RAG_PDF/RAG_PDF.csproj --launch-profile http
+   ```
+   Open `http://localhost:5044` for the web interface. The development OpenAPI document is at `/openapi/v1.json`.
+
+3. **Upload a PDF** through the web interface or with curl:
+   ```bash
+   curl --fail-with-body -F "file=@my-document.pdf" http://localhost:5044/upload
+   ```
+
+4. **Ask a question**:
+   ```bash
+   curl --fail-with-body -H "Content-Type: application/json" \
+     -d '{"Question": "What is the summary of this document?"}' \
+     http://localhost:5044/ask
+   ```
+
+**Re-upload existing PDFs:** the new Qdrant collection starts empty; existing Azure AI Search records are not migrated. Embeddings are regenerated during upload. Repeated uploads create additional chunks rather than replacing earlier uploads.
+
+### 6. Persistence and Troubleshooting
+
+- `docker compose down` stops/removes the container but retains document chunks and embeddings in the named `qdrant-storage` volume. Start again with `docker compose up -d --wait`.
+- `docker compose down -v` **deletes the database volume**. You must re-upload PDFs afterward.
+- Use `docker compose logs qdrant` and `curl --fail http://localhost:6333/readyz` to check the database.
+- Upload a PDF before asking questions: the collection is created during ingestion.
+- If ports 6333 or 6334 are already occupied, change the host-side Compose port mappings and update `Qdrant__GrpcPort` to match the mapped gRPC port.
+- A vector-dimension error means the embedding deployment and the 1,536-dimensional schema do not match.
+- If you later containerize the application, use the Compose service name `qdrant` as its database host, rather than `localhost`.
 
 ### Summary of the "Best Way to Learn"
 1.  **Read the Code**: Start with `PdfChunk.cs` to see how data is structured, then `PdfIngestionService.cs` for the flow.

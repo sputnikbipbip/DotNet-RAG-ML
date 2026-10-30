@@ -11,11 +11,11 @@ namespace RAG_PDF.Services;
 public class PdfIngestionService
 {
     private readonly IEmbeddingGenerator<string, Embedding<float>> _embeddingGenerator;
-    private readonly VectorStoreCollection<string, PdfChunk> _collection;
+    private readonly VectorStoreCollection<Guid, PdfChunk> _collection;
 
     public PdfIngestionService(
         IEmbeddingGenerator<string, Embedding<float>> embeddingGenerator,
-        VectorStoreCollection<string, PdfChunk> collection)
+        VectorStoreCollection<Guid, PdfChunk> collection)
     {
         _embeddingGenerator = embeddingGenerator;
         _collection = collection;
@@ -23,7 +23,7 @@ public class PdfIngestionService
 
     public async Task IngestPdfAsync(Stream pdfStream, string fileName)
     {
-        // 1. Create index if not exists
+        // 1. Create collection if not exists
         await _collection.EnsureCollectionExistsAsync();
 
         // 2. Extract text from PDF

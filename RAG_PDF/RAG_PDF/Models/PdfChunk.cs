@@ -5,7 +5,7 @@ namespace RAG_PDF.Models;
 public class PdfChunk
 {
     [VectorStoreKey]
-    public string Id { get; set; } = Guid.CreateVersion7().ToString();
+    public Guid Id { get; set; } = Guid.CreateVersion7();
 
     [VectorStoreData]
     public string Text { get; set; } = string.Empty;
@@ -13,6 +13,6 @@ public class PdfChunk
     [VectorStoreData]
     public string FileName { get; set; } = string.Empty;
 
-    [VectorStoreVector(1536)] // Size for text-embedding-3-small
+    [VectorStoreVector(1536, DistanceFunction = DistanceFunction.CosineSimilarity)] // Size for text-embedding-3-small
     public ReadOnlyMemory<float> Vector { get; set; }
 }

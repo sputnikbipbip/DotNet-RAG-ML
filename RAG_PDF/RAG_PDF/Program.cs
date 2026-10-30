@@ -1,7 +1,8 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.VectorData;
-using Microsoft.SemanticKernel.Connectors.AzureAISearch;
+using Microsoft.SemanticKernel.Connectors.Qdrant;
+using Qdrant.Client;
 using OpenAI;
 using RAG_PDF.Models;
 using RAG_PDF.Options;
@@ -9,13 +10,17 @@ using RAG_PDF.Services;
 using System.ClientModel;
 using Azure.AI.OpenAI;
 using Azure;
-using Azure.Search.Documents.Indexes;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Options
 builder.Services.Configure<DeepSeekOptions>(builder.Configuration.GetSection("DeepSeek"));
-builder.Services.Configure<AzureAISearchOptions>(builder.Configuration.GetSection("AzureAISearch"));
+builder.Services.AddOptions<QdrantOptions>()
+    .Bind(builder.Configuration.GetSection("Qdrant"))
+    .Validate(options => !string.IsNullOrWhiteSpace(options.Host), "Qdrant:Host is required.")
+    .Validate(options => options.GrpcPort is > 0 and <= 65535, "Qdrant:GrpcPort must be between 1 and 65535.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.CollectionName), "Qdrant:CollectionName is required.")
+    .ValidateOnStart();
 builder.Services.Configure<AzureOpenAIOptions>(builder.Configuration.GetSection("AzureOpenAI"));
 
 // DeepSeek Chat Client
@@ -36,20 +41,23 @@ builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(sp 
         .AsIEmbeddingGenerator();
 });
 
-// Azure AI Search Vector Store
+// Local Qdrant Vector Store (gRPC)
+builder.Services.AddSingleton<QdrantClient>(sp =>
+{
+    var options = sp.GetRequiredService<IOptions<QdrantOptions>>().Value;
+    return new QdrantClient(options.Host, options.GrpcPort);
+});
 builder.Services.AddSingleton<VectorStore>(sp =>
 {
-    var options = sp.GetRequiredService<IOptions<AzureAISearchOptions>>().Value;
-    var indexClient = new SearchIndexClient(new Uri(options.Endpoint), new AzureKeyCredential(options.ApiKey));
-    return new AzureAISearchVectorStore(indexClient);
+    return new QdrantVectorStore(sp.GetRequiredService<QdrantClient>(), ownsClient: false);
 });
 
 // Vector Store Collection
-builder.Services.AddSingleton<VectorStoreCollection<string, PdfChunk>>(sp =>
+builder.Services.AddSingleton<VectorStoreCollection<Guid, PdfChunk>>(sp =>
 {
     var vectorStore = sp.GetRequiredService<VectorStore>();
-    var options = sp.GetRequiredService<IOptions<AzureAISearchOptions>>().Value;
-    return vectorStore.GetCollection<string, PdfChunk>(options.IndexName);
+    var options = sp.GetRequiredService<IOptions<QdrantOptions>>().Value;
+    return vectorStore.GetCollection<Guid, PdfChunk>(options.CollectionName);
 });
 
 // Services
