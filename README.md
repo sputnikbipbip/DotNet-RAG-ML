@@ -124,9 +124,9 @@ Run these commands from the repository root:
    ```bash
    dotnet run --project RAG_PDF/RAG_PDF/RAG_PDF.csproj --launch-profile http
    ```
-   Open `http://localhost:5044` for the web interface. The development OpenAPI document is at `/openapi/v1.json`.
+   Open `http://localhost:5044` for the web interface (or `https://localhost:7159` when using the `https` launch profile). The development OpenAPI document is at `/openapi/v1.json`.
 
-3. **Upload a PDF** through the web interface or with curl:
+3. **Upload PDFs** through the web interface (browse or drag and drop multiple PDFs) or with curl:
    ```bash
    curl --fail-with-body -F "file=@my-document.pdf" http://localhost:5044/upload
    ```
@@ -139,6 +139,8 @@ Run these commands from the repository root:
    ```
 
 **Re-upload existing PDFs:** the new `pdf-vectors-embeddinggemma2-768` collection starts empty. Existing collections (including `pdf-vectors`) are left intact, but their Azure-generated embeddings cannot be reused. Repeated uploads create additional chunks rather than replacing earlier uploads.
+
+The document library lists distinct filenames found in the indexed chunks, including documents uploaded before this interface was added. Files with the same name appear as one entry; no original PDF is stored. Questions search the entire collection and use the five closest chunks, so answers may not cover every document. Chat messages remain visible until the page is refreshed or cleared, but each question is sent independently without chat history.
 
 ### 6. Persistence and Troubleshooting
 

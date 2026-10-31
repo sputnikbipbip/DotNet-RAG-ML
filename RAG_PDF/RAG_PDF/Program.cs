@@ -77,6 +77,7 @@ builder.Services.AddSingleton<VectorStoreCollection<Guid, PdfChunk>>(sp =>
 // Services
 builder.Services.AddScoped<PdfIngestionService>();
 builder.Services.AddScoped<RagService>();
+builder.Services.AddScoped<DocumentListingService>();
 
 builder.Services.AddOpenApi();
 
@@ -93,6 +94,9 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 // API Endpoints
+app.MapGet("/documents", async (DocumentListingService documents, CancellationToken cancellationToken) =>
+    Results.Ok(await documents.ListFileNamesAsync(cancellationToken)));
+
 app.MapPost("/upload", async (IFormFile file, PdfIngestionService ingestionService) =>
 {
     if (file == null || file.Length == 0)
@@ -101,7 +105,10 @@ app.MapPost("/upload", async (IFormFile file, PdfIngestionService ingestionServi
     }
     
     using var stream = file.OpenReadStream();
-    await ingestionService.IngestPdfAsync(stream, file.FileName);
+    if (!await ingestionService.IngestPdfAsync(stream, file.FileName))
+    {
+        return Results.BadRequest("No extractable text was found in the PDF.");
+    }
     
     return Results.Ok($"File {file.FileName} ingested successfully.");
 })

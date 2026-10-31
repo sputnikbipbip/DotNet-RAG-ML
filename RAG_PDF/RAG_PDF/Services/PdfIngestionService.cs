@@ -21,7 +21,7 @@ public class PdfIngestionService
         _collection = collection;
     }
 
-    public async Task IngestPdfAsync(Stream pdfStream, string fileName)
+    public async Task<bool> IngestPdfAsync(Stream pdfStream, string fileName)
     {
         // 1. Create collection if not exists
         await _collection.EnsureCollectionExistsAsync();
@@ -31,6 +31,10 @@ public class PdfIngestionService
 
         // 3. Chunk text (Simple chunking for this example)
         var chunks = ChunkText(text, 1000);
+        if (chunks.Count == 0)
+        {
+            return false;
+        }
 
         // 4. Keep local embedding requests small and use EmbeddingGemma's document prefix.
         foreach (var batch in chunks.Chunk(16))
@@ -56,6 +60,7 @@ public class PdfIngestionService
 
             await _collection.UpsertAsync(pdfChunks);
         }
+        return true;
     }
 
     private string ExtractTextFromPdf(Stream pdfStream)
